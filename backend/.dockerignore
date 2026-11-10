@@ -1,0 +1,12 @@
+.env
+.env.*
+!.env.example
+.venv/
+venv/
+data/
+__pycache__/
+**/__pycache__/
+.pytest_cache/
+*.pyc
+Dockerfile
+.dockerignore

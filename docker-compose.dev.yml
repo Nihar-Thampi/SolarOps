@@ -1,0 +1,54 @@
+# SolarOps with live reload: edit the code (on either machine) and the running app updates.
+#   Start:  docker compose -f docker-compose.dev.yml up --build     then open http://localhost:5182
+#   Stop:   docker compose -f docker-compose.dev.yml down
+# The source is mounted from this folder; node_modules and Python packages stay in Docker.
+
+name: solarops
+
+services:
+  backend:
+    build: ./backend
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload --reload-dir app
+    env_file:
+      - path: ./backend/.env
+        required: false
+    environment:
+      # The local LLM runs outside Docker (in Ollama) so it can use the GPU.
+      LOCAL_LLM_URL: ${LOCAL_LLM_URL:-http://host.docker.internal:11434}
+      FRONTEND_URL: http://localhost:5182
+      CORS_ORIGINS: '["http://localhost:5182","http://127.0.0.1:5182"]'
+      WATCHFILES_FORCE_POLLING: "true"
+    # Lets the container reach Ollama running on this machine.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ./backend:/app
+
+  frontend:
+    # Its own image name, so the dev image never replaces the built one from docker-compose.yml.
+    image: solarops-frontend-dev
+    build:
+      context: ./frontend
+      target: dev
+    # node_modules lives in a Docker volume, never in the synced folder. It is reinstalled
+    # only when package-lock.json changes (for example after an update synced from the other machine).
+    command: >-
+      sh -c 'lock=$$(sha1sum package-lock.json | cut -c1-40);
+      if [ "$$(cat node_modules/.lock-sha1 2>/dev/null)" != "$$lock" ]; then
+      npm ci --no-audit --no-fund && echo "$$lock" > node_modules/.lock-sha1; fi;
+      exec npm run dev -- --host 0.0.0.0 --port 5182 --strictPort'
+    environment:
+      API_URL: ${API_URL:-http://backend:8000}
+      VITE_POLL: "1"
+    ports:
+      - "5182:5182"
+    volumes:
+      - ./frontend:/app
+      - frontend-node-modules:/app/node_modules
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      - backend
+
+volumes:
+  frontend-node-modules:

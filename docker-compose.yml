@@ -1,0 +1,46 @@
+# SolarOps, built and served the same way on Windows and macOS.
+#   Start:            docker compose up -d --build        then open http://localhost:8082
+#   After an update:  docker compose up -d --build        (rebuilds only what changed)
+#   Logs:             docker compose logs -f backend
+#   Stop:             docker compose down
+# Live reload while editing: docker-compose.dev.yml (see the top of that file).
+# Dependencies live in the images; nothing installed here is synced by OneDrive.
+# First start with no database seeds the demo data (admin@sunpeak.demo / SolarOps!2026).
+# Re-seed:          docker compose run --rm backend python seed.py
+
+name: solarops
+
+services:
+  backend:
+    build: ./backend
+    env_file:
+      - path: ./backend/.env
+        required: false
+    environment:
+      # The local LLM runs outside Docker (in Ollama) so it can use the GPU.
+      LOCAL_LLM_URL: ${LOCAL_LLM_URL:-http://host.docker.internal:11434}
+      # These override backend/.env, which is set up for running outside Docker.
+      FRONTEND_URL: http://localhost:${SOLAROPS_PORT:-8082}
+      CORS_ORIGINS: '["http://localhost:${SOLAROPS_PORT:-8082}","http://127.0.0.1:${SOLAROPS_PORT:-8082}"]'
+    # Lets the container reach Ollama running on this machine.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      # The database stays in backend/data, so OneDrive syncs it as before.
+      - ./backend/data:/app/data
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 60s
+    restart: unless-stopped
+
+  frontend:
+    build: ./frontend
+    ports:
+      - "${SOLAROPS_PORT:-8082}:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
